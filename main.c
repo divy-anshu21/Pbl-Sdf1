@@ -123,7 +123,6 @@ static void DrawIcon(const DesktopIcon *ic)
         ic->bounds.y,
         ICON_SIZE, ICON_SIZE
     };
-
     if (ic->hasTexture) {
         Rectangle src = { 0, 0, (float)ic->texture.width, (float)ic->texture.height };
         DrawTexturePro(ic->texture, src, img, (Vector2){ 0, 0 }, 0.0f, WHITE);
