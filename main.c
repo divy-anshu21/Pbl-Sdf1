@@ -9,6 +9,7 @@
 #define CELL_W       110     
 #define CELL_H       100
 #define LABEL_FONT   18
+#define FONT_ATLAS_SIZE 32
 static Font labelFont = { 0 };
 static bool labelFontLoaded = false;
 typedef struct {
@@ -37,7 +38,7 @@ static void DrawOutlinedText(const char *text, Vector2 position,
         { -1,  0 },             { 1,  0 },
         { -1,  1 }, { 0,  1 }, { 1,  1 }
     };
-    const Color outline = { 0, 0, 0, 150 };
+    const Color outline = { 0, 0, 0, 100 };
 
     if (labelFontLoaded) {
         for (int i = 0; i < 8; i++) {
@@ -68,7 +69,8 @@ static Texture2D LoadIfExists(const char *path, bool *found)
     *found = FileExists(path);
     if (*found) {
         t = LoadTexture(path);
-        SetTextureFilter(t, TEXTURE_FILTER_BILINEAR);
+        GenTextureMipmaps(&t);
+        SetTextureFilter(t, TEXTURE_FILTER_TRILINEAR);
     }
     return t;
 }
@@ -194,9 +196,16 @@ static void DrawTaskbar(Texture2D startButton, bool hasStartButton)
         clockY = y + 11;
     }
     DrawRectangle(SCREEN_W - boxW, y + 2, boxW, TASKBAR_H - 2, (Color){ 15, 22, 38, 255 });
-    DrawOutlinedText(clock,
-                     (Vector2){ (float)(SCREEN_W - boxW + 20), clockY },
-                     clockFontSize, 1.0f, WHITE);
+    Vector2 clockPosition = {
+        (float)(SCREEN_W - boxW + 20),
+        (float)((int)clockY)
+    };
+    if (labelFontLoaded) {
+        DrawTextEx(labelFont, clock, clockPosition, clockFontSize, 1.0f, WHITE);
+    } else {
+        DrawText(clock, (int)clockPosition.x, (int)clockPosition.y,
+                 (int)clockFontSize, WHITE);
+    }
 }
 
 static Rectangle AppWindowBounds(void)
@@ -248,8 +257,16 @@ int main(void)
      
     ChangeDirectory(GetApplicationDirectory());
 
+    if (FileExists("assets/windows_vista.png")) {
+        Image windowIcon = LoadImage("assets/windows_vista.png");
+        if (windowIcon.data != NULL) {
+            SetWindowIcon(windowIcon);
+            UnloadImage(windowIcon);
+        }
+    }
+
      
-    labelFont = LoadFontEx("assets/SEGUISB.TTF", LABEL_FONT, NULL, 0);
+    labelFont = LoadFontEx("assets/SEGUISB.TTF", FONT_ATLAS_SIZE, NULL, 0);
     labelFontLoaded = (labelFont.texture.id != 0);
 
     bool hasWallpaper;
@@ -259,7 +276,9 @@ int main(void)
     LoadIcons();
 
     bool appOpen = false;
+    bool context_menu_open = false;
     AppId activeApp = APP_CALCULATOR;
+    Rectangle box;
 
     while (!WindowShouldClose())
     {
@@ -273,6 +292,7 @@ int main(void)
                 appOpen = false;
             }
         } else if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+            context_menu_open= false;
             Vector2 mouse = GetMousePosition();
             for (int i = 0; i < APP_COUNT; i++) {
                 if (CheckCollisionPointRec(mouse, icons[i].bounds)) {
@@ -281,6 +301,20 @@ int main(void)
                     break;
                 }
             }
+        }
+        else if(IsMouseButtonPressed(MOUSE_BUTTON_RIGHT)){
+            Vector2 mouse_right = GetMousePosition();
+            for(int i=0;i< APP_COUNT;i++)
+            {
+                if(CheckCollisionPointRec(mouse_right , icons[i].bounds)){
+                    box.x = mouse_right.x;
+                    box.y = mouse_right.y;
+                    box.width = 150;
+                    box.height = 107;
+                    context_menu_open = true;
+                    activeApp = icons[i].app;
+                }
+            } 
         }
 
          
@@ -291,6 +325,13 @@ int main(void)
                 DrawAppScreen(activeApp);
             } else {
                 for (int i = 0; i < APP_COUNT; i++) DrawIcon(&icons[i]);
+            }
+            if(context_menu_open){
+                DrawRectangleRec(box, GRAY);
+                DrawOutlinedText("Open",(Vector2){box.x+8,box.y+8},25,1.0F,WHITE);
+                DrawOutlinedText("Rename",(Vector2){box.x+8,box.y+(8*2)+25},25,1.0F,WHITE);
+                DrawOutlinedText("Delete",(Vector2){box.x+8,box.y+8+25+8+25+8},25,1.0F,WHITE);
+                
             }
             DrawTaskbar(startButton, hasStartButton);
         EndDrawing();
