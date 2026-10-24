@@ -1,5 +1,6 @@
 main.exe
 os.exe
+.vscode/
 # Prerequisites
 *.d
 
