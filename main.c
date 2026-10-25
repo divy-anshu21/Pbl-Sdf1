@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <time.h>
+#include <string.h>
 #include "raylib.h"
 #include "apps.h"
 #define SCREEN_W     1280
@@ -13,7 +14,7 @@
 static Font labelFont = { 0 };
 static bool labelFontLoaded = false;
 typedef struct {
-    const char *name;         
+    char name[32];         
     const char *file;         
     Color       fallback;     
     AppId       app;          
@@ -58,6 +59,34 @@ static void DrawOutlinedText(const char *text, Vector2 position,
         }
         DrawText(text, (int)position.x, (int)position.y, (int)fontSize, color);
     }
+}
+
+static void appRename(char *buffer, int capacity)
+{
+    int character;
+    while ((character = GetCharPressed()) > 0) {
+        int length = (int)strlen(buffer);
+        if (character >= 32 && character <= 126 && length < capacity - 1) {
+            buffer[length] = (char)character;
+            buffer[length + 1] = '\0';
+        }
+    }
+
+    if (IsKeyPressed(KEY_BACKSPACE)) {
+        int length = (int)strlen(buffer);
+        if (length > 0) buffer[length - 1] = '\0';
+    }
+
+    Rectangle panel = { (SCREEN_W - 340) / 2, (SCREEN_H - 140) / 2, 340, 140 };
+    Rectangle input = { panel.x + 20, panel.y + 52, panel.width - 40, 34 };
+    DrawRectangleRec(panel, (Color){ 35, 45, 65, 255 });
+    DrawRectangleLinesEx(panel, 2, WHITE);
+    DrawText("Enter a new name:", (int)panel.x + 20, (int)panel.y + 18, 20, WHITE);
+    DrawRectangleRec(input, RAYWHITE);
+    DrawRectangleLinesEx(input, 1, DARKGRAY);
+    DrawText(buffer, (int)input.x + 8, (int)input.y + 8, 18, BLACK);
+    DrawText("Enter: save    Esc: cancel", (int)panel.x + 20,
+             (int)panel.y + 104, 16, LIGHTGRAY);
 }
 
  
@@ -252,6 +281,7 @@ static void DrawAppScreen(AppId app)
 int main(void)
 {
     InitWindow(SCREEN_W, SCREEN_H, "Mini Desktop OS Simulation in C (Raylib)");
+    SetExitKey(KEY_NULL);
     SetTargetFPS(60);
 
      
@@ -277,28 +307,59 @@ int main(void)
 
     bool appOpen = false;
     bool context_menu_open = false;
+    bool renaming = false;
+    int selectedIcon = -1;
+    char renameBuffer[32] = "";
     AppId activeApp = APP_CALCULATOR;
     Rectangle box;
+    Rectangle openBounds;
+    Rectangle renameBounds;
+    Rectangle deleteBounds ;
+    bool iconDeleted[APP_COUNT] = {false};
+
 
     while (!WindowShouldClose())
     {
-         
-
-
-        if (appOpen) {
+        if (renaming) {
+            if (IsKeyPressed(KEY_ENTER)) {
+                if (selectedIcon >= 0) strcpy(icons[selectedIcon].name, renameBuffer);
+                renaming = false;
+            } else if (IsKeyPressed(KEY_ESCAPE)) {
+                renaming = false;
+            }
+        } else if (appOpen) {
             if (IsKeyPressed(KEY_ESCAPE)) appOpen = false;
             if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) &&
                 CheckCollisionPointRec(GetMousePosition(), AppCloseButtonBounds())) {
                 appOpen = false;
             }
         } else if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-            context_menu_open= false;
             Vector2 mouse = GetMousePosition();
-            for (int i = 0; i < APP_COUNT; i++) {
-                if (CheckCollisionPointRec(mouse, icons[i].bounds)) {
-                    activeApp = icons[i].app;
+            if (context_menu_open && CheckCollisionPointRec(mouse, openBounds)) {
+                if (selectedIcon >= 0&&!iconDeleted[selectedIcon]) {
+                    activeApp = icons[selectedIcon].app;
                     appOpen = true;
-                    break;
+                }
+                context_menu_open = false;
+            } else if (context_menu_open && CheckCollisionPointRec(mouse, renameBounds)) {
+                if (selectedIcon >= 0 && !iconDeleted[selectedIcon]) {
+                    strcpy(renameBuffer, icons[selectedIcon].name);
+                    renaming = true;
+                }
+                context_menu_open = false;
+            }else if(context_menu_open && CheckCollisionPointRec(mouse, deleteBounds))
+            {
+                if(selectedIcon>=0) iconDeleted[selectedIcon] = true;
+                context_menu_open = false;
+            }
+             else {
+                context_menu_open = false;
+                for (int i = 0; i < APP_COUNT; i++) {
+                    if (CheckCollisionPointRec(mouse, icons[i].bounds)&& !iconDeleted[i]) {
+                        activeApp = icons[i].app;
+                        appOpen = true;
+                        break;
+                    }
                 }
             }
         }
@@ -306,13 +367,14 @@ int main(void)
             Vector2 mouse_right = GetMousePosition();
             for(int i=0;i< APP_COUNT;i++)
             {
-                if(CheckCollisionPointRec(mouse_right , icons[i].bounds)){
+                if(CheckCollisionPointRec(mouse_right , icons[i].bounds) && !iconDeleted[i]){
                     box.x = mouse_right.x;
                     box.y = mouse_right.y;
                     box.width = 150;
                     box.height = 107;
                     context_menu_open = true;
                     activeApp = icons[i].app;
+                    selectedIcon = i;
                 }
             } 
         }
@@ -324,15 +386,20 @@ int main(void)
             if (appOpen) {
                 DrawAppScreen(activeApp);
             } else {
-                for (int i = 0; i < APP_COUNT; i++) DrawIcon(&icons[i]);
+                for (int i = 0; i < APP_COUNT; i++) {if(!iconDeleted[i])DrawIcon(&icons[i]);}
             }
             if(context_menu_open){
                 DrawRectangleRec(box, GRAY);
                 DrawOutlinedText("Open",(Vector2){box.x+8,box.y+8},25,1.0F,WHITE);
                 DrawOutlinedText("Rename",(Vector2){box.x+8,box.y+(8*2)+25},25,1.0F,WHITE);
                 DrawOutlinedText("Delete",(Vector2){box.x+8,box.y+8+25+8+25+8},25,1.0F,WHITE);
-                
+                DrawLine(box.x,box.y+25+8+4,box.x+box.width,box.y+25+8+4,BLACK);
+                DrawLine(box.x,box.y+25+8+8+25+4,box.x+box.width,box.y+25+8+8+25+4,BLACK);
+                openBounds   = (Rectangle){ box.x, box.y,      box.width, 37 };
+                renameBounds = (Rectangle){ box.x, box.y + 38, box.width, 32 };
+                deleteBounds =(Rectangle){ box.x, box.y + 71, box.width, 36 }; 
             }
+            if (renaming) appRename(renameBuffer, sizeof(renameBuffer));
             DrawTaskbar(startButton, hasStartButton);
         EndDrawing();
     }
