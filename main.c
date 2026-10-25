@@ -11,6 +11,7 @@
 #define CELL_H       100
 #define LABEL_FONT   18
 #define FONT_ATLAS_SIZE 32
+Rectangle taskbar_bounds = {0 ,SCREEN_H-TASKBAR_H,SCREEN_W,TASKBAR_H};
 static Font labelFont = { 0 };
 static bool labelFontLoaded = false;
 typedef struct {
@@ -28,6 +29,10 @@ static DesktopIcon icons[APP_COUNT] = {
     { "Image Editor", "assets/image_editor.png", { 230, 140,  60, 255 }, APP_IMAGE_EDITOR },
     { "Music Player", "assets/music_player.png", {  60, 120, 220, 255 }, APP_MUSIC_PLAYER },
     { "Notepad",      "assets/notepad.png",      { 120, 190, 220, 255 }, APP_NOTEPAD      },
+};
+
+static const char *const initialIconNames[APP_COUNT] = {
+    "Calculator", "Image Editor", "Music Player", "Notepad"
 };
 
  
@@ -61,6 +66,31 @@ static void DrawOutlinedText(const char *text, Vector2 position,
     }
 }
 
+static void DrawMenuPanel(Rectangle bounds)
+{
+    Rectangle shadow = { bounds.x + 3, bounds.y + 4, bounds.width, bounds.height };
+    DrawRectangleRounded(shadow, 0.12f, 8, (Color){ 0, 0, 0, 105 });
+    DrawRectangleRounded(bounds, 0.12f, 8, (Color){ 29, 35, 47, 250 });
+    DrawRectangleLinesEx(bounds, 1.0f, (Color){ 83, 96, 116, 255 });
+}
+
+static void DrawMenuItem(Rectangle bounds, const char *label, bool destructive)
+{
+    bool hovered = CheckCollisionPointRec(GetMousePosition(), bounds);
+    if (hovered) {
+        Color hoverColor = destructive
+            ? (Color){ 103, 53, 59, 255 }
+            : (Color){ 52, 78, 111, 255 };
+        DrawRectangleRounded(bounds, 0.22f, 8, hoverColor);
+    }
+
+    Color textColor = destructive && !hovered
+        ? (Color){ 242, 137, 137, 255 }
+        : (Color){ 238, 242, 248, 255 };
+    DrawOutlinedText(label, (Vector2){ bounds.x + 12, bounds.y + 7 },
+                     20, 1.0f, textColor);
+}
+
 static void appRename(char *buffer, int capacity)
 {
     int character;
@@ -85,6 +115,12 @@ static void appRename(char *buffer, int capacity)
     DrawRectangleRec(input, RAYWHITE);
     DrawRectangleLinesEx(input, 1, DARKGRAY);
     DrawText(buffer, (int)input.x + 8, (int)input.y + 8, 18, BLACK);
+    if ((int)(GetTime() * 2.0) % 2 == 0) {
+        int cursorX = (int)input.x + 8 + MeasureText(buffer, 18);
+        int cursorMaxX = (int)(input.x + input.width - 8);
+        if (cursorX > cursorMaxX) cursorX = cursorMaxX;
+        DrawLine(cursorX, (int)input.y + 7, cursorX, (int)input.y + 27, BLACK);
+    }
     DrawText("Enter: save    Esc: cancel", (int)panel.x + 20,
              (int)panel.y + 104, 16, LIGHTGRAY);
 }
@@ -210,30 +246,41 @@ static void DrawTaskbar(Texture2D startButton, bool hasStartButton)
     time_t now = time(NULL);
     struct tm *lt = localtime(&now);
     char clock[16];
-    strftime(clock, sizeof(clock), "%H:%M", lt);
+    char date[16];
+    strftime(clock, sizeof(clock), "%I:%M %p", lt);
+    strftime(date, sizeof(date), "%d-%m-%Y", lt);
 
-    const float clockFontSize = 22.0f;
-    int boxW;
-    float clockY;
+    const float clockFontSize = 19.0f;
+    const float dateFontSize = 13.0f;
     Vector2 clockSize = { 0 };
+    Vector2 dateSize = { 0 };
     if (labelFontLoaded) {
         clockSize = MeasureTextEx(labelFont, clock, clockFontSize, 1.0f);
-        boxW = (int)clockSize.x + 40;
-        clockY = y + (TASKBAR_H - clockSize.y) / 2.0f;
+        dateSize = MeasureTextEx(labelFont, date, dateFontSize, 1.0f);
     } else {
-        boxW = MeasureText(clock, (int)clockFontSize) + 40;
-        clockY = y + 11;
+        clockSize = (Vector2){ (float)MeasureText(clock, (int)clockFontSize), clockFontSize };
+        dateSize = (Vector2){ (float)MeasureText(date, (int)dateFontSize), dateFontSize };
     }
+    float textWidth = clockSize.x > dateSize.x ? clockSize.x : dateSize.x;
+    int boxW = (int)textWidth + 28;
     DrawRectangle(SCREEN_W - boxW, y + 2, boxW, TASKBAR_H - 2, (Color){ 15, 22, 38, 255 });
     Vector2 clockPosition = {
-        (float)(SCREEN_W - boxW + 20),
-        (float)((int)clockY)
+        SCREEN_W - boxW + (boxW - clockSize.x) / 2.0f,
+        (float)y + 3
+    };
+    Vector2 datePosition = {
+        SCREEN_W - boxW + (boxW - dateSize.x) / 2.0f,
+        (float)y + 24
     };
     if (labelFontLoaded) {
         DrawTextEx(labelFont, clock, clockPosition, clockFontSize, 1.0f, WHITE);
+        DrawTextEx(labelFont, date, datePosition, dateFontSize, 1.0f,
+                   (Color){ 190, 202, 220, 255 });
     } else {
         DrawText(clock, (int)clockPosition.x, (int)clockPosition.y,
                  (int)clockFontSize, WHITE);
+        DrawText(date, (int)datePosition.x, (int)datePosition.y,
+                 (int)dateFontSize, (Color){ 190, 202, 220, 255 });
     }
 }
 
@@ -312,9 +359,11 @@ int main(void)
     char renameBuffer[32] = "";
     AppId activeApp = APP_CALCULATOR;
     Rectangle box;
+    Rectangle refresh;
     Rectangle openBounds;
     Rectangle renameBounds;
     Rectangle deleteBounds ;
+    bool refresh_bar = false;
     bool iconDeleted[APP_COUNT] = {false};
 
 
@@ -335,48 +384,81 @@ int main(void)
             }
         } else if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
             Vector2 mouse = GetMousePosition();
-            if (context_menu_open && CheckCollisionPointRec(mouse, openBounds)) {
-                if (selectedIcon >= 0&&!iconDeleted[selectedIcon]) {
-                    activeApp = icons[selectedIcon].app;
-                    appOpen = true;
-                }
-                context_menu_open = false;
-            } else if (context_menu_open && CheckCollisionPointRec(mouse, renameBounds)) {
-                if (selectedIcon >= 0 && !iconDeleted[selectedIcon]) {
-                    strcpy(renameBuffer, icons[selectedIcon].name);
-                    renaming = true;
-                }
-                context_menu_open = false;
-            }else if(context_menu_open && CheckCollisionPointRec(mouse, deleteBounds))
-            {
-                if(selectedIcon>=0) iconDeleted[selectedIcon] = true;
-                context_menu_open = false;
-            }
-             else {
-                context_menu_open = false;
+            if (refresh_bar && CheckCollisionPointRec(mouse, refresh)) {
                 for (int i = 0; i < APP_COUNT; i++) {
-                    if (CheckCollisionPointRec(mouse, icons[i].bounds)&& !iconDeleted[i]) {
-                        activeApp = icons[i].app;
+                    strcpy(icons[i].name, initialIconNames[i]);
+                    iconDeleted[i] = false;
+                }
+
+                appOpen = false;
+                context_menu_open = false;
+                renaming = false;
+                selectedIcon = -1;
+                activeApp = APP_CALCULATOR;
+                renameBuffer[0] = '\0';
+                refresh_bar = false;
+            } else {
+                refresh_bar = false;
+                if (context_menu_open && CheckCollisionPointRec(mouse, openBounds)) {
+                    if (selectedIcon >= 0 && !iconDeleted[selectedIcon]) {
+                        activeApp = icons[selectedIcon].app;
                         appOpen = true;
-                        break;
+                    }
+                    context_menu_open = false;
+                } else if (context_menu_open && CheckCollisionPointRec(mouse, renameBounds)) {
+                    if (selectedIcon >= 0 && !iconDeleted[selectedIcon]) {
+                        strcpy(renameBuffer, icons[selectedIcon].name);
+                        renaming = true;
+                    }
+                    context_menu_open = false;
+                } else if (context_menu_open && CheckCollisionPointRec(mouse, deleteBounds)) {
+                    if (selectedIcon >= 0) iconDeleted[selectedIcon] = true;
+                    context_menu_open = false;
+                } else {
+                    context_menu_open = false;
+                    for (int i = 0; i < APP_COUNT; i++) {
+                        if (CheckCollisionPointRec(mouse, icons[i].bounds) && !iconDeleted[i]) {
+                            activeApp = icons[i].app;
+                            appOpen = true;
+                            break;
+                        }
                     }
                 }
             }
         }
         else if(IsMouseButtonPressed(MOUSE_BUTTON_RIGHT)){
             Vector2 mouse_right = GetMousePosition();
-            for(int i=0;i< APP_COUNT;i++)
-            {
-                if(CheckCollisionPointRec(mouse_right , icons[i].bounds) && !iconDeleted[i]){
-                    box.x = mouse_right.x;
-                    box.y = mouse_right.y;
-                    box.width = 150;
-                    box.height = 107;
-                    context_menu_open = true;
-                    activeApp = icons[i].app;
-                    selectedIcon = i;
+            int clickedIcon = -1;
+
+            for (int i = 0; i < APP_COUNT; i++) {
+                if (!iconDeleted[i] &&
+                    CheckCollisionPointRec(mouse_right, icons[i].bounds)) {
+                    clickedIcon = i;
+                    break;
                 }
-            } 
+            }
+
+            if (clickedIcon >= 0) {
+                box = (Rectangle){ mouse_right.x, mouse_right.y, 190, 124 };
+                if (box.x + box.width > SCREEN_W) box.x = SCREEN_W - box.width;
+                if (box.y + box.height > SCREEN_H - TASKBAR_H)
+                    box.y = SCREEN_H - TASKBAR_H - box.height;
+                context_menu_open = true;
+                refresh_bar = false;
+                activeApp = icons[clickedIcon].app;
+                selectedIcon = clickedIcon;
+            } else if (!CheckCollisionPointRec(mouse_right, taskbar_bounds)) {
+                refresh = (Rectangle){ mouse_right.x, mouse_right.y, 190, 46 };
+                if (refresh.x + refresh.width > SCREEN_W)
+                    refresh.x = SCREEN_W - refresh.width;
+                if (refresh.y + refresh.height > SCREEN_H - TASKBAR_H)
+                    refresh.y = SCREEN_H - TASKBAR_H - refresh.height;
+                refresh_bar = true;
+                context_menu_open = false;
+            } else {
+                context_menu_open = false;
+                refresh_bar = false;
+            }
         }
 
          
@@ -389,15 +471,26 @@ int main(void)
                 for (int i = 0; i < APP_COUNT; i++) {if(!iconDeleted[i])DrawIcon(&icons[i]);}
             }
             if(context_menu_open){
-                DrawRectangleRec(box, GRAY);
-                DrawOutlinedText("Open",(Vector2){box.x+8,box.y+8},25,1.0F,WHITE);
-                DrawOutlinedText("Rename",(Vector2){box.x+8,box.y+(8*2)+25},25,1.0F,WHITE);
-                DrawOutlinedText("Delete",(Vector2){box.x+8,box.y+8+25+8+25+8},25,1.0F,WHITE);
-                DrawLine(box.x,box.y+25+8+4,box.x+box.width,box.y+25+8+4,BLACK);
-                DrawLine(box.x,box.y+25+8+8+25+4,box.x+box.width,box.y+25+8+8+25+4,BLACK);
-                openBounds   = (Rectangle){ box.x, box.y,      box.width, 37 };
-                renameBounds = (Rectangle){ box.x, box.y + 38, box.width, 32 };
-                deleteBounds =(Rectangle){ box.x, box.y + 71, box.width, 36 }; 
+                DrawMenuPanel(box);
+                openBounds   = (Rectangle){ box.x + 5, box.y + 5, box.width - 10, 36 };
+                renameBounds = (Rectangle){ box.x + 5, box.y + 44, box.width - 10, 36 };
+                deleteBounds = (Rectangle){ box.x + 5, box.y + 83, box.width - 10, 36 };
+                DrawMenuItem(openBounds, "Open", false);
+                DrawMenuItem(renameBounds, "Rename", false);
+                DrawMenuItem(deleteBounds, "Delete", true);
+                DrawLine(box.x + 12, box.y + 42, box.x + box.width - 12,
+                         box.y + 42, (Color){ 70, 79, 94, 255 });
+                DrawLine(box.x + 12, box.y + 81, box.x + box.width - 12,
+                         box.y + 81, (Color){ 70, 79, 94, 255 });
+            }
+            if(refresh_bar)
+            {
+               DrawMenuPanel(refresh);
+               Rectangle refreshItem = {
+                   refresh.x + 5, refresh.y + 5, refresh.width - 10, refresh.height - 10
+               };
+               DrawMenuItem(refreshItem, "Refresh", false);
+
             }
             if (renaming) appRename(renameBuffer, sizeof(renameBuffer));
             DrawTaskbar(startButton, hasStartButton);
